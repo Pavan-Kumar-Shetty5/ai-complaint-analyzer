@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Complaint Analyzer</title>
+<style>
+body{margin:0;background:#f7f6f3;color:#1d1d1b;font:16px/1.5 system-ui,sans-serif}
+main{max-width:820px;margin:0 auto;padding:24px 16px 48px}
+textarea{width:100%;min-height:150px;padding:12px;border:1px solid #e2e0da;border-radius:10px;font:inherit;box-sizing:border-box}
+button{background:#2f5d50;color:#fff;border:0;border-radius:8px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer;margin-top:12px}
+button.ghost{background:transparent;color:#2f5d50;border:1px solid #2f5d50}
+button:disabled{opacity:.5}
+.tabs button{margin-top:0;margin-right:6px}
+.card{background:#fff;border:1px solid #e2e0da;border-radius:12px;padding:16px;margin-top:12px}
+.lbl{font-size:.75rem;text-transform:uppercase;color:#6b6a65}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.val{font-weight:600}.High{color:#b3261e}.Medium{color:#b26a00}.Low{color:#2e7d32}.err{color:#b3261e}
+table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e2e0da;vertical-align:top}
+.wrap{overflow-x:auto}.hide{display:none}.muted{color:#6b6a65;font-size:.9rem}
+</style></head><body><main>
+<h1>AI Complaint Analyzer</h1>
+<div class="tabs"><button id="t1">Type text</button><button id="t2" class="ghost">Upload file</button></div>
+
+<section id="s1">
+<textarea id="in" placeholder="Paste a complaint here…"></textarea><br>
+<button id="go">Analyze</button>
+</section>
+
+<section id="s2" class="hide">
+<p class="muted">Supported: image (PNG, JPG, WEBP, GIF), Word (.docx), PDF, TXT, or CSV with a <b>complaint</b> column (max 25 rows). Max 10 MB.</p>
+<input type="file" id="file" accept=".csv,.docx,.pdf,.txt,.png,.jpg,.jpeg,.webp,.gif"><br>
+<button id="ugo">Analyze file</button>
+</section>
+
+<div id="out"></div>
+<button id="dl" class="ghost hide">Download CSV results</button>
+</main><script>
+const $=id=>document.getElementById(id);
+const esc=t=>{const d=document.createElement("div");d.textContent=t??"";return d.innerHTML};
+let rows=[];
+function show(w){$("s1").classList.toggle("hide",w!==1);$("s2").classList.toggle("hide",w!==2);
+  $("t1").className=w===1?"":"ghost";$("t2").className=w===2?"":"ghost";$("out").innerHTML="";$("dl").classList.add("hide")}
+$("t1").onclick=()=>show(1);$("t2").onclick=()=>show(2);
+
+function single(r,note){
+  return (note?`<p class="muted">${esc(note)}</p>`:"")+`<div class="card"><div class="grid">
+  <div><div class="lbl">Category</div><div class="val">${esc(r.category)}</div></div>
+  <div><div class="lbl">Sentiment</div><div class="val">${esc(r.sentiment)}</div></div>
+  <div><div class="lbl">Urgency</div><div class="val ${esc(r.urgency)}">${esc(r.urgency)}</div></div></div></div>
+  <div class="card"><div class="lbl">Summary</div><p>${esc(r.summary)}</p>
+  <div class="lbl">Key issues</div><ul>${(r.issues||[]).map(i=>`<li>${esc(i)}</li>`).join("")}</ul></div>
+  <div class="card"><div class="lbl">Suggested reply</div><p>${esc(r.reply)}</p></div>`;
+}
+function batch(j){
+  rows=j.results;
+  $("dl").classList.remove("hide");
+  return (j.truncated?`<p class="err">Only the first ${j.limit} rows were processed.</p>`:"")+
+  `<div class="card wrap"><table><tr><th>#</th><th>Category</th><th>Sentiment</th><th>Urgency</th><th>Summary</th></tr>`+
+  rows.map(r=>r.error?`<tr><td>${r.row}</td><td colspan="4" class="err">${esc(r.error)}</td></tr>`:
+   `<tr><td>${r.row}</td><td>${esc(r.category)}</td><td>${esc(r.sentiment)}</td><td class="${esc(r.urgency)}">${esc(r.urgency)}</td><td>${esc(r.summary)}</td></tr>`).join("")+`</table></div>`;
+}
+async function run(btn,req){
+  btn.disabled=true;$("dl").classList.add("hide");$("out").innerHTML="<p>Analyzing… this can take a while for files.</p>";
+  try{
+    const res=await req; const j=await res.json(); if(!res.ok) throw new Error(j.error);
+    $("out").innerHTML=j.kind==="batch"?batch(j):single(j.result,j.note);
+  }catch(e){$("out").innerHTML=`<p class="err">${esc(e.message||"Request failed")}</p>`}
+  btn.disabled=false;
+}
+$("go").onclick=()=>{const text=$("in").value.trim(); if(!text)return;
+  run($("go"),fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text})}))};
+$("ugo").onclick=()=>{const f=$("file").files[0]; if(!f)return;
+  const fd=new FormData(); fd.append("file",f); run($("ugo"),fetch("/api/upload",{method:"POST",body:fd}))};
+$("dl").onclick=()=>{
+  const q=v=>'"'+String(v??"").replace(/"/g,'""')+'"';
+  const csv=["row,complaint,category,sentiment,urgency,summary"].concat(
+    rows.map(r=>[r.row,r.complaint,r.category,r.sentiment,r.urgency,r.summary].map(q).join(","))).join("\n");
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv"}));a.download="complaint-analysis.csv";a.click();
+};
+</script></body></html>
